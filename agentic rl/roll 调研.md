@@ -550,4 +550,149 @@ flowchart LR
 - **做多轮 Agent 训练，且需要真实环境反馈、沙箱执行、代码测试或终端任务**：ROLL + ROCK 是最匹配的组合。
     
 - **准备生产落地**：必须先补齐版本锁定、镜像治理、Ray/GPU 运维、ROCK 沙箱安全、网络隔离、日志审计和成本监控。
-    
+
+---
+下面是对 ROLL 项目的调研总结（基于仓库 `/home/zhangyuchang/projects/ROLL` 的实际代码和最近 30 次提交）。
+
+---
+
+# ROLL 项目调研报告
+
+## 1. 项目定位
+
+**ROLL（Reinforcement Learning Optimization for Large-Scale Learning）** 是阿里巴巴淘天集团 + AI Engine 团队开源的 **大规模 LLM 强化学习训练框架**，Apache 2.0 许可，对应 arXiv 技术报告 2506.06122（2025-06）。
+
+**要解决的问题**：在大规模 GPU 集群上，把 PPO/GRPO/DPO/SFT/蒸馏等多种训练范式跑起来，覆盖人类偏好对齐、复杂推理、多轮 agentic 交互，并且让推理引擎（vLLM/SGLang）、训练引擎（Megatron/DeepSpeed/FSDP2）、环境 rollout 能作为独立 Ray 角色协同运作。
+
+---
+
+## 2. 顶层目录一览
+
+| 目录                                           | 作用                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `roll/`                                        | 核心 Python 包（pipeline / distributed / models / agentic / third_party / utils / configs） |
+| `examples/`                                    | 30+ 套可直接运行的 YAML 配置 + 启动脚本（按模型规模/任务分类）                              |
+| `tests/`                                       | 覆盖 agentic、datasets、distributed、math、pipeline、third_party 的单元/集成测试            |
+| `docs_roll/`                                   | Docusaurus 多语言文档站                                                                     |
+| `mcore_adapter/`                               | 独立子包，把 Megatron-Core 适配成类 HF API（与 `megatron_strategy` 配合使用）               |
+| `docker/`                                      | NVIDIA / AMD / Ascend NPU 镜像配置                                                          |
+| `scripts/`, `data/`, `assets/`, `third_party/` | 辅助脚本、示例数据、Logo、历史三方代码                                                      |
+
+---
+
+## 3. 核心架构（比 CLAUDE.md 更细）
+
+### 3.1 Pipeline 层（`roll/pipeline/`）
+
+| Pipeline      | 主文件                                                        | 关键内容                                                                                                                                   |
+| ------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **RLVR**      | `rlvr/rlvr_pipeline.py`（825 行）+ `rlvr_config.py`           | 多域 reward 路由、动态采样、异步 rollout、difficulty/max-len mask；Worker = `ActorWorker` + `ActorPGWorker`                                |
+| **Agentic**   | `agentic/agentic_pipeline.py`（1020 行）+ `agentic_config.py` | 多轮环境交互；Worker = `AgenticActorWorker` + `EnvironmentWorker` + `AgenticActorPGWorker`；支持 TrajectoryWise(StarPO) 与 StepWise(GiGPO) |
+| **Distill**   | `distill/distill_pipeline.py`（+ `distill_vlm_pipeline.py`）  | 教师→学生 logits/soft-target 蒸馏，含 VLM 版本                                                                                             |
+| **DPO**       | `dpo/dpo_pipeline.py`                                         | 直接偏好优化                                                                                                                               |
+| **SFT**       | `sft/sft_pipeline.py`                                         | 有监督微调                                                                                                                                 |
+| **Diffusion** | `diffusion/`                                                  | 扩散模型的 RL 训练                                                                                                                         |
+
+### 3.2 分布式层（`roll/distributed/`）
+
+- **Scheduler**：`RouterManager`、`GenerateScheduler`/`AsyncGenerateScheduler`、`RolloutScheduler`、`RewardScheduler`；数据协议 `DataProto`
+- **Executor**：`Cluster`（封装一组 Ray Actor）、`Worker`、`ModelUpdateGroup`（actor → ref 同步参数）
+- **Strategy**（每个 = 一种训练/推理后端）：
+  - `megatron_strategy.py`（1375 行，DP/TP/PP/CP/EP 五维并行）
+  - `deepspeed_strategy.py`（ZeRO 1/2/3）
+  - `fsdp2_strategy.py`（最新的 PyTorch FSDP2）
+  - `vllm_strategy.py` / `sglang_strategy.py`（推理）
+  - `hf_strategy.py`（兜底）
+  - `diffusion_strategy.py`
+  - 统一抽象：`forward_step / generate / save_checkpoint / broadcast_parameter / update_parameter_in_bucket`
+
+### 3.3 Agentic 环境
+
+FrozenLake、Sokoban、WebShop、DeepEyes、ROCK、**OpenReward（刚由你合入）**、MCP-based、GEM Tool Use。
+
+### 3.4 Models（`roll/models/`）
+
+`ModelProviders`（HF/ModelScope）、`FuncProviders`、TRL 补丁，支持 Qwen2.5 / Qwen3 / Qwen3-MoE / Qwen-VL 等。
+
+---
+
+## 4. 配置系统
+
+**Hydra + OmegaConf + dacite**，YAML → 强类型 dataclass。
+
+主要 config 类位于 `roll/configs/`：`base_config.py (PPOConfig)`、`worker_config.py`、`training_args.py`、`model_args.py`、`generating_args.py`、`data_args.py`。
+
+每个 worker 的 YAML 典型结构：
+```yaml
+actor_train:
+  model_args: {dtype: bf16, ...}
+  training_args: {learning_rate: 1e-6, ...}
+  strategy_args: {strategy_name: megatron_train, tensor_model_parallel_size: 1, ...}
+  device_mapping: [0-7]
+actor_infer:
+  strategy_args: {strategy_name: vllm}   # 或 sglang
+```
+顶层控制 `rollout_batch_size / prompt_length / response_length / ppo_epochs / adv_estimator / reward_clip / advantage_clip / difficulty_mask / max_len_mask` 等。
+
+---
+
+## 5. 训练入口
+
+`examples/start_rlvr_pipeline.py` / `start_agentic_pipeline.py`：
+1. 解析 CLI → Hydra `initialize() + compose()` 载入 YAML
+2. OmegaConf → `RLVRConfig` / `AgenticConfig`（dacite 强类型）
+3. `roll.distributed.scheduler.initialize.init()` 起 Ray、资源管理
+4. `Pipeline(...).run()` → 建 actor/ref/reward/env/validation 集群 → 主循环：rollout → reward → advantage → PPO → backward → ckpt → log
+
+---
+
+## 6. 三方整合（`roll/third_party/`）
+
+- **vLLM**：多版本补丁 `vllm_0_8_4 / 0_10_2 / 0_11_0 / 0_12_0`，含 FP8 动态量化、Ray 分布式执行器、Async LLM Engine
+- **SGLang**：`v0410post2_patch / v046post4_patch / ...`，FP8 支持
+- **DeepSpeed、FSDP2**：优化/offload 相关补丁
+- **mcore_adapter**：独立子目录，把 Megatron-Core 包成 HF 风格 API，负责 HF↔Megatron 权重转换
+
+---
+
+## 7. 最近开发动态（`git log`）
+
+活跃度很高，近期主线：
+- `75266829` **trackio 集成**（你）
+- `a49a915d` **动态 batching 的 DP size 修复**（`use_ref_model=False` 时用 Cluster 而非 WorkerConfig；你加了回归测试 `tests/test_ref_worker_type_consistency.py`）
+- `bc9af123 / b39681bf` **OpenReward 接入**
+- 更早：Ascend NPU、FSDP2 + LoRA、Megatron+LoRA、Qwen3 / Qwen3-MoE 支持、On-Policy Distillation、GPU partial overlap
+
+关键字：Qwen3 全家桶、NPU、FSDP2、动态 FP8、OpenReward、TrackIO。
+
+---
+
+## 8. 依赖（`requirements_common.txt` 及各后端变体）
+
+- 分布式：`ray[default,cgraph]==2.48.0`
+- 训练：transformers、`peft==0.12.0`、`trl==0.9.6`、deepspeed、megatron-core、`mcore_adapter`（本地）
+- 推理：vllm、sglang、sglang-router
+- 配置：hydra-core、omegaconf、dacite
+- Tracking：wandb、swanlab、**trackio**
+- 数据：`datasets==3.1.0`、modelscope
+- 环境：gymnasium[toy-text]、gym_sokoban、`gem-llm==0.0.4`、mcp
+- 数学验证：math-verify、latex2sympy2、sympy、`numpy<2.0`
+- 按后端另有 `requirements_torch260_vllm.txt` / `requirements_torch280_sglang.txt` / `requirements_torch260_diffsynth.txt`
+
+---
+
+## 9. 测试
+
+`tests/` 按模块分目录：`agentic/`、`datasets/`、`distributed/`、`math/`、`models/`、`pipeline/`、`third_party/`、`utils/`；`conftest.py` 放共享 fixture；`pytest.ini` 配置入口。最近新增 `tests/test_ref_worker_type_consistency.py` 用于守住 DP size 回归。
+
+---
+
+## 10. 文档（`docs_roll/`）
+
+Docusaurus 多语言站点，章节包括：Getting Started / 配置系统 / 各 Pipeline / 算法（PPO、GRPO、GSPO、Reinforce++、TOPR、GiGPO、StarPO 等 20+）/ 后端（DeepSpeed、Megatron、vLLM、SGLang）/ 异步训练、ckpt 恢复、Ascend NPU、Tracker 对接。
+
+---
+
+## 总体结论
+
+ROLL = **Ray 多角色执行器 + 可插拔训练/推理 Strategy + Hydra 强类型配置 + 丰富 RL 算法/环境** 的大规模 LLM RL 框架。它把"训练后端"（Megatron/DeepSpeed/FSDP2）和"推理后端"（vLLM/SGLang）作为独立集群，通过 `ModelUpdateGroup` 同步权重，这是它能把 PPO/GRPO/多轮 agentic/蒸馏跑在同一套基座上的关键。对你当前的工作（trackio、动态 batching、OpenReward）而言，改动点都集中在 `roll/pipeline/*` 和 `roll/distributed/executor/cluster` 的交界处，这也是仓库近期最活跃的区域。

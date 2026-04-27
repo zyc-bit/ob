@@ -9,11 +9,11 @@
 
 ## 1. 结论摘要
 
-ROCK，全称可理解为 **Reinforcement Open Construction Kit**，是阿里开源的强化学习环境开发与管理框架。它的核心定位不是“训练算法库”，而是面向 Agentic RL / LLM Agent 训练场景的 **环境基础设施层**：负责沙箱创建、销毁、状态管理、命令执行、文件操作、GEM 风格交互接口，以及与训练框架进行环境侧集成。官方文档将其定义为“开源的强化学习环境开发框架”，目标是帮助开发者快速构建环境，并与不同强化学习训练框架集成。:contentReference[oaicite:0]{index=0}
+ROCK，全称可理解为 **Reinforcement Open Construction Kit**，是阿里开源的强化学习环境开发与管理框架。它的核心定位不是“训练算法库”，而是面向 Agentic RL / LLM Agent 训练场景的 **环境基础设施层**：负责沙箱创建、销毁、状态管理、命令执行、文件操作、GEM 风格交互接口，以及与训练框架进行环境侧集成。官方文档将其定义为“开源的强化学习环境开发框架”，目标是帮助开发者快速构建环境，并与不同强化学习训练框架集成。
 
-从当前公开资料看，ROCK 适合用于 **代码智能体、终端智能体、Sokoban 等 Agentic RL 环境、SWE-Bench 类评测、ROLL 训练框架环境接入、大规模沙箱 Rollout** 等场景。它提供 SDK、CLI、Admin、Worker、Rocklet、EnvHub 等组件，并采用客户端-服务端架构管理沙箱与环境生命周期。:contentReference[oaicite:1]{index=1}
+从当前公开资料看，ROCK 适合用于 **代码智能体、终端智能体、Sokoban 等 Agentic RL 环境、SWE-Bench 类评测、ROLL 训练框架环境接入、大规模沙箱 Rollout** 等场景。它提供 SDK、CLI、Admin、Worker、Rocklet、EnvHub 等组件，并采用客户端-服务端架构管理沙箱与环境生命周期。
 
-项目处于快速发展期。截至本次调研，GitHub 仓库显示约 421 stars、57 forks、64 issues、35 pull requests；PyPI 上的 `rl-rock` 最新版本为 1.6.0，发布时间为 2026-04-20。:contentReference[oaicite:2]{index=2} 版本演进较快，v1.6.0 还包含 Job 模块重构、EnvHub 配置破坏性变更等内容，因此应将其视为 **活跃但接口仍在快速演进的基础设施项目**。:contentReference[oaicite:3]{index=3}
+项目处于快速发展期。截至本次调研，GitHub 仓库显示约 421 stars、57 forks、64 issues、35 pull requests；PyPI 上的 `rl-rock` 最新版本为 1.6.0，发布时间为 2026-04-20。版本演进较快，v1.6.0 还包含 Job 模块重构、EnvHub 配置破坏性变更等内容，因此应将其视为 **活跃但接口仍在快速演进的基础设施项目**。
 
 综合判断：**ROCK 值得重点关注，尤其适合正在做 Agentic RL、代码智能体训练或需要大量隔离沙箱环境的团队；但不建议未经 PoC、权限隔离、安全审计和运维验证就直接进入生产大规模使用。**
 
@@ -32,7 +32,7 @@ ROCK，全称可理解为 **Reinforcement Open Construction Kit**，是阿里开
 | 核心定位 | 强化学习环境开发、沙箱管理、Agentic RL 环境基础设施 |
 | 典型使用对象 | RL 算法工程师、Agent 工程师、LLM 后训练团队、环境平台团队 |
 
-官方首页将 ROCK 描述为面向强化学习环境的平台，强调其提供标准化基础设施、模型服务接入、TPP 访问以及内置场景。:contentReference[oaicite:4]{index=4} GitHub README 中的核心描述则更偏工程化：它是一个易用且可大规模扩展的环境管理框架，提供沙箱管理、客户端-服务端架构、隔离机制、SDK 集成和 GEM-like 协议。:contentReference[oaicite:5]{index=5}
+官方首页将 ROCK 描述为面向强化学习环境的平台，强调其提供标准化基础设施、模型服务接入、TPP 访问以及内置场景。 GitHub README 中的核心描述则更偏工程化：它是一个易用且可大规模扩展的环境管理框架，提供沙箱管理、客户端-服务端架构、隔离机制、SDK 集成和 GEM-like 协议。
 
 ---
 
